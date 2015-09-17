@@ -1,0 +1,233 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Kyle Tan"
+date: "Tuesday, September 15, 2015"
+output: html_document
+---
+
+#Executive Summary
+The goal of this project is to predict the manner (A/B/C/D/E) in which participants did Dumbbell Biceps Curl. The data taken from 4 sensors recording 6 young participants performing the Dumbbell Biceps Curl is used as predictors. Cross Validation on Training/Test set will be used to assess the expected mean Out-Of-Sample error for 2 methods (CART vs RF). 
+
+The method with the highest acccuracy (RF, expected 99.5%) is chosen, with the best performing model (Model RF #2, 99.6%), and applied to the Validation data (20 test cases) to predict the manner (A/B/C/D/E). Final results yield 100% accuracy on validation data (20 test cases).
+
+Data is based on (http://groupware.les.inf.puc-rio.br/har) found in section on Weight Lifting Exercises Dataset.
+
+# Summary of Methodology
+1. Get Data
+2. Clean Data
+3. Partition Data (Cross Validation K-Fold, K=4)
+4. Methodology 1: CART
+5. Methodology 2: Random Forest
+6. Model Selection
+7. Apply Model on Test Data
+
+# Reproduceability
+To ensure reproduceability, the following library and seed must be loaded
+```{r, results="hide", message=FALSE}
+library(caret)
+library(rpart)
+library(rattle)
+library(randomForest)
+set.seed(88888)
+```
+
+# Import Data
+We import the dataset downloaded from the URLs:
+-Training: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+-Testing: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+```{r setwd, results="hide", echo=FALSE}
+setwd("C:/Users/IBM_ADMIN/Desktop/Kyle_Analytics/00_R/03_IDAMOCC_Data_Science_Specialization/08_Practical_Machine_Learning/04_Project")
+```
+```{r load_data, cache=TRUE}
+training <- read.csv("pml-training.csv", na.strings=c("NA","","#DIV/0!"))
+testing <- read.csv("pml-testing.csv", na.strings=c("NA","","#DIV/0!"))
+```
+
+# Basic Data Exploration
+We did some basic data exploration. Initial round of visual inspection suggests that some columns have too many missing values.
+```{r explore_data, results="hide"}
+str(training)
+summary(training)
+```
+
+# Clean Data
+Clean #1: We removed 100 columns with >60% missing values.
+```{r clean_date, cache=TRUE}
+getNaCol <- function(x, thres) { # custom function to find NA columns
+        index <- c()
+        percent <- c()
+        noObs <- dim(x)[1]
+        for (i in 1:dim(x)[2]) { # loop thru all cols
+                missing <- sum( is.na(x[,i]) ) / noObs
+                if ( missing >= thres ) { 
+                        index <- append(index,i) # col w missing % > thres
+                        percent <- missing
+                }
+        }
+        return(rbind(index,percent))
+}
+naIndex <- getNaCol(training,0.6) #>60% missing values
+training_clean1 <- training[-naIndex[1,]]
+```
+
+Clean #2: We next removed 1 near zero variance column.
+```{r}
+zeroVarIndex <- nearZeroVar(training_clean1)
+training_clean2 <- training_clean1[-zeroVarIndex]
+```
+
+Clean #3: Finally we dropped first 6 columns that are visually inspected and determined to have no predictive power.
+```{r}
+training_cleanf <- training_clean2[,-c(1:6)]
+```
+
+Clean Test Data: We did the same cleaning for our test data.
+```{r}
+testing_clean1 <- testing[-naIndex[1,]]
+testing_clean2 <- testing_clean1[-zeroVarIndex]
+testing_cleanf <- testing_clean2[,-c(1:6)]
+```
+
+Check Cleaned Data Tally: We made sure the remaining columns in training/test data matches.
+```{r}
+cbind(names(training_cleanf),names(training_cleanf))
+```
+
+# Parition Data 
+We chose to perform K-Fold (K=4) Cross Validation by dividing the training set into 4.
+```{r parition_data, cache=TRUE}
+inTrain <- createFolds(training_cleanf$classe, k=4, list=TRUE, returnTrain=TRUE)
+sapply(inTrain,length)
+# Training/Validation set 1
+training1 <- training_cleanf[inTrain$Fold1,]
+validation1 <- training_cleanf[-inTrain$Fold1,]
+# Training/Validation set 2
+training2 <- training_cleanf[inTrain$Fold2,]
+validation2 <- training_cleanf[-inTrain$Fold2,]
+# Training/Validation set 3
+training3 <- training_cleanf[inTrain$Fold3,]
+validation3 <- training_cleanf[-inTrain$Fold3,]
+# Training/Validation set 4
+training4 <- training_cleanf[inTrain$Fold4,]
+validation4 <- training_cleanf[-inTrain$Fold4,]
+```
+
+# Methodology 1 - CART Model
+## Modelling - CART
+We first apply CART Model to our training data using the RPART function. Here we use "classe" as the predicate, and all other variables as potential predictors. 
+```{r cart_model_train, cache=TRUE}
+# CART Model - Training set 1
+modFitRp1 <- train(classe ~ ., data=training1, method="rpart")
+fancyRpartPlot(modFitRp1$finalModel)
+# CART Model - Training set 2
+modFitRp2 <- train(classe ~ ., data=training2, method="rpart")
+fancyRpartPlot(modFitRp2$finalModel)
+# CART Model - Training set 3
+modFitRp3 <- train(classe ~ ., data=training3, method="rpart")
+fancyRpartPlot(modFitRp3$finalModel)
+# CART Model - Training set 1
+modFitRp4 <- train(classe ~ ., data=training4, method="rpart")
+fancyRpartPlot(modFitRp4$finalModel)
+```
+
+## Results - CART
+The 4 CART models are largely similar splitting the tree on roll_belt, pitch_forearm, magnet_dumbbell_y, roll_forearm.
+
+We test the model accuracy on their respective validation (hold out) data set.
+```{r cart_model_validation, cache=TRUE}
+# CART Model - Validation set 1
+predictRp1 <- predict(modFitRp1, newdata=validation1)
+cMatrixRp1 <- confusionMatrix(predictRp1, validation1$classe)
+accuracy_Rp1 <- cMatrixRp1$overall["Accuracy"]
+# CART Model - Validation set 2
+predictRp2 <- predict(modFitRp2, newdata=validation2)
+cMatrixRp2 <- confusionMatrix(predictRp2, validation2$classe)
+accuracy_Rp2 <- cMatrixRp2$overall["Accuracy"]
+# CART Model - Validation set 3
+predictRp3 <- predict(modFitRp3, newdata=validation3)
+cMatrixRp3 <- confusionMatrix(predictRp3, validation3$classe)
+accuracy_Rp3 <- cMatrixRp3$overall["Accuracy"]
+# CART Model - Validation set 4
+predictRp4 <- predict(modFitRp4, newdata=validation4)
+cMatrixRp4 <- confusionMatrix(predictRp4, validation4$classe)
+accuracy_Rp4 <- cMatrixRp4$overall["Accuracy"]
+```
+
+The CART Model method's expected Accuracy is low at 49.5%. It is however, important to compare this result to the baseline of 20% if a naive model of uniform distribution (i.e. guess A/B/C/D/E with equal probability) is used. This model has >2 times better accuracy than the baseline model.
+``` {r cart_model_accuracy, cache=TRUE}
+x=cbind(accuracy_Rp1,accuracy_Rp2,accuracy_Rp3,accuracy_Rp4)
+cbind(x,expected_Rp=mean(x))
+```
+
+# Methodology 2 - Random Forest (RF) Model
+## Modelling - RF
+We next apply RF Model to our training data using the RF function. Here we use "classe" as the predicate, and all other variables as potential predictors. 
+```{r rf_model_train, cache=TRUE}
+# RF Model - Training set 1
+modFitRf1 <- randomForest(classe ~ ., data=training1)
+print(modFitRf1)
+# RF Model - Training set 2
+modFitRf2 <- randomForest(classe ~ ., data=training2)
+print(modFitRf2)
+# RF Model - Training set 3
+modFitRf3 <- randomForest(classe ~ ., data=training3)
+print(modFitRf3)
+# RF Model - Training set 1
+modFitRf4 <- randomForest(classe ~ ., data=training4)
+print(modFitRf4)
+```
+
+## Results - RF
+The 4 RF models are perfomring quite well on the training set from the low error rate in the each confusion Matrix.
+ 
+We test the model accuracy on their respective validation (hold out) data set.
+```{r rf_model_validation, cache=TRUE}
+# RF Model - Validation set 1
+predictRf1 <- predict(modFitRf1, newdata=validation1)
+cMatrixRf1 <- confusionMatrix(predictRf1, validation1$classe)
+accuracy_Rf1 <- cMatrixRf1$overall["Accuracy"]
+# RF Model - Validation set 2
+predictRf2 <- predict(modFitRf2, newdata=validation2)
+cMatrixRf2 <- confusionMatrix(predictRf2, validation2$classe)
+accuracy_Rf2 <- cMatrixRf2$overall["Accuracy"]
+# RF Model - Validation set 3
+predictRf3 <- predict(modFitRf3, newdata=validation3)
+cMatrixRf3 <- confusionMatrix(predictRf3, validation3$classe)
+accuracy_Rf3 <- cMatrixRf3$overall["Accuracy"]
+# RF Model - Validation set 4
+predictRf4 <- predict(modFitRf4, newdata=validation4)
+cMatrixRf4 <- confusionMatrix(predictRf4, validation4$classe)
+accuracy_Rf4 <- cMatrixRf4$overall["Accuracy"]
+```
+
+The RF Model method's expected Accuracy is 99.5%, which is > double the expected Accuracy for CART. 
+``` {r rf_model_accuracy, cache=TRUE}
+y=cbind(accuracy_Rf1,accuracy_Rf2,accuracy_Rf3,accuracy_Rf4)
+cbind(y,expected_Rf=mean(y))
+```
+
+# Model Selection
+The highest accuracy is achieved by RF methodology (99.5%) compared to CART methodology (49.5%). From the 4 RF models, we chose Model #2 with the highest accuracy of 99.6%.
+```{r}
+print(accuracy_Rf2)
+```
+
+# Apply Model on Test Data
+Finally, we apply our chosen model (RF model #2) to the out-of-sample Test data to get the predicted outcome:
+```{r apply_on_test, cache=TRUE}
+predictF <-  predict(modFitRf2, newdata=testing_cleanf)
+print(predictF)
+```
+And this generates the files for submission
+```{r write_to_file, cache=TRUE}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(predictF)
+```
+
+
